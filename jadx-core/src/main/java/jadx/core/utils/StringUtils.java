@@ -193,4 +193,12 @@ public class StringUtils {
 			sb.append(c);
 		}
 	}
+
+	public static String firstCharToUpper(String str){
+		return Character.toUpperCase(str.charAt(0)) + str.substring(1);
+	}
+
+	public static String firstCharToLower(String str){
+		return Character.toLowerCase(str.charAt(0)) + str.substring(1);
+	}
 }

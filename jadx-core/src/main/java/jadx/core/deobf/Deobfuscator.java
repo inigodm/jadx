@@ -39,6 +39,8 @@ public class Deobfuscator {
 	private final List<DexNode> dexNodes;
 	private final DeobfPresets deobfPresets;
 
+	private NameGenerator nameGenerator;
+
 	private final Map<ClassInfo, DeobfClsInfo> clsMap = new HashMap<>();
 	private final Map<FieldInfo, String> fldMap = new HashMap<>();
 	private final Map<MethodInfo, String> mthMap = new HashMap<>();
@@ -52,11 +54,6 @@ public class Deobfuscator {
 	private final int maxLength;
 	private final int minLength;
 	private final boolean useSourceNameAsAlias;
-
-	private int pkgIndex = 0;
-	private int clsIndex = 0;
-	private int fldIndex = 0;
-	private int mthIndex = 0;
 
 	public Deobfuscator(JadxArgs args, @NotNull List<DexNode> dexNodes, File deobfMapFile) {
 		this.args = args;
@@ -72,18 +69,10 @@ public class Deobfuscator {
 	public void execute() {
 		if (!args.isDeobfuscationForceSave()) {
 			deobfPresets.load();
-			initIndexes();
 		}
-		process();
+		process(new SecuentialNameGenerator(deobfPresets, pkgSet.size()));
 		deobfPresets.save(args.isDeobfuscationForceSave());
 		clear();
-	}
-
-	private void initIndexes() {
-		pkgIndex = pkgSet.size();
-		clsIndex = deobfPresets.getClsPresetMap().size();
-		fldIndex = deobfPresets.getFldPresetMap().size();
-		mthIndex = deobfPresets.getMthPresetMap().size();
 	}
 
 	private void preProcess() {
@@ -94,7 +83,8 @@ public class Deobfuscator {
 		}
 	}
 
-	private void process() {
+	private void process(NameGenerator nameGenerator) {
+		this.nameGenerator = nameGenerator;
 		preProcess();
 		if (DEBUG) {
 			dumpAlias();
@@ -108,7 +98,6 @@ public class Deobfuscator {
 	}
 
 	private void postProcess() {
-		int id = 1;
 		for (OverridedMethodsNode o : ovrd) {
 			boolean aliasFromPreset = false;
 			String aliasToUse = null;
@@ -121,15 +110,13 @@ public class Deobfuscator {
 			for (MethodInfo mth : o.getMethods()) {
 				if (aliasToUse == null) {
 					if (mth.isRenamed() && !mth.isAliasFromPreset()) {
-						mth.setAlias(String.format("mo%d%s", id, makeName(mth.getName())));
+						mth.setAlias(nameGenerator.generateOverridedMethodName(mth.getName()));
 					}
 					aliasToUse = mth.getAlias();
 				}
 				mth.setAlias(aliasToUse);
 				mth.setAliasFromPreset(aliasFromPreset);
 			}
-
-			id++;
 		}
 	}
 
@@ -348,7 +335,7 @@ public class Deobfuscator {
 
 		if (alias == null) {
 			String clsName = classInfo.getShortName();
-			alias = String.format("C%04d%s", clsIndex++, makeName(clsName));
+			alias = nameGenerator.generateClassName(clsName);
 		}
 		PackageNode pkg = getPackageNode(classInfo.getPackage(), true);
 		clsMap.put(classInfo, new DeobfClsInfo(this, cls, pkg, alias));
@@ -412,13 +399,13 @@ public class Deobfuscator {
 	}
 
 	public String makeFieldAlias(FieldNode field) {
-		String alias = String.format("f%d%s", fldIndex++, makeName(field.getName()));
+		String alias = nameGenerator.generateFieldName(field.getName());
 		fldMap.put(field.getFieldInfo(), alias);
 		return alias;
 	}
 
 	public String makeMethodAlias(MethodNode mth) {
-		String alias = String.format("m%d%s", mthIndex++, makeName(mth.getName()));
+		String alias = nameGenerator.generateMethodName(mth.getName());
 		mthMap.put(mth.getMethodInfo(), alias);
 		return alias;
 	}
@@ -440,7 +427,7 @@ public class Deobfuscator {
 
 		String pkgName = pkg.getName();
 		if (!pkg.hasAlias() && shouldRename(pkgName)) {
-			String pkgAlias = String.format("p%03d%s", pkgIndex++, makeName(pkgName));
+			String pkgAlias = nameGenerator.generatePackageName(pkgName);
 			pkg.setAlias(pkgAlias);
 		}
 	}
@@ -450,19 +437,6 @@ public class Deobfuscator {
 				|| s.length() < minLength
 				|| NameMapper.isReserved(s)
 				|| !NameMapper.isAllCharsPrintable(s);
-	}
-
-	private String makeName(String name) {
-		if (name.length() > maxLength) {
-			return "x" + Integer.toHexString(name.hashCode());
-		}
-		if (NameMapper.isReserved(name)) {
-			return name;
-		}
-		if (!NameMapper.isAllCharsPrintable(name)) {
-			return removeInvalidChars(name);
-		}
-		return name;
 	}
 
 	private String removeInvalidChars(String name) {
